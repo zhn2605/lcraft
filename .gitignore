@@ -1,0 +1,17 @@
+Cargo.lock
+/target/
+
+*.exe
+*.out
+*.out
+*.a
+*.dylib
+*.so
+*.dll
+
+.vscode/
+
+/.cargo/
+
+*.swp
+*.bak
