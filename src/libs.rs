@@ -1,12 +1,12 @@
 #[derive(Clone)]
 
-struct User {
+pub struct User {
     user_name: String,
     curr_room: String,
 }
 
 #[derive(Clone)]
-struct Room {
+pub struct Room {
     room_name: String,
     room_password: String,
     room_port: u16,
@@ -47,5 +47,9 @@ impl Room {
     fn remove_user(&mut self, name: &str) {
         self.users.retain(|user| user.user_name != name);
         self.user_count -= 1;
+    }
+
+    pub fn get_users(&self) -> &Vec<User> {
+        &self.users
     }
 }
