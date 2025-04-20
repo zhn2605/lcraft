@@ -8,7 +8,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: cargo --run [server|client]");
+        eprintln!("Usage: cargo run [server|client]");
         process::exit(1);
     }
 

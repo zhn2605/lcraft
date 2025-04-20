@@ -41,6 +41,7 @@ fn handle_input() {
 
                     join_room(&server_ip, port, &name, &pswd);
                 },
+                "/host" => host_room(),
                 _ => { println!("{}", input); }
             }
         }
@@ -49,10 +50,10 @@ fn handle_input() {
 
 fn show_help() {
     println!("Help Menu:");
-    println!("/h, /help\n\t- Show this help menu");
-    println!("/list\n\t- Show available chat rooms");
-    println!("/join <server_ip> <port> [name] [password]\n\t- Join specified port");
-    println!("/host\n\t- todo");
+    println!("* /h, /help\n  Show this help menu\n");
+    println!("* /list\n  Show available chat rooms\n");
+    println!("* /join <server_ip> <port> [name] [password]\n  Join specified port\n");
+    println!("* /host\n  todo\n");
 }
 
 fn join_room(server_ip: &str, port: u16, name: &str, password: &str) {
