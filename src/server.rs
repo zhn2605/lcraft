@@ -1,58 +1,92 @@
-use std::io::{Read, Write};
-use std::collections::HashMap;
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream, TcpListener};
+use std::thread;
+use std::sync::{Arc, Mutex, mpsc};
 
 use crate::libs::{User, Room};
 
-#[derive(Default)]
-pub struct Server {
-    rooms: HashMap<String, Room>,
-}
+const MSG_SIZE: usize = 512;
 
-impl Server {
-    fn new() -> Self {
-        Server {
-            rooms: HashMap::new(),
-        }
-    }
+pub fn start_server() -> io::Result<()> {
+    let listener = TcpListener::bind("0.0.0.0:8080")?;
+    listener.set_nonblocking(true)?;
 
-    pub fn start_server() -> std::io::Result<()> {
-        let listener = TcpListener::bind("0.0.0.0:8080")?;
+    let users = Arc::new(Mutex::new(Vec::<User>::new()));
     
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    println!("New client connected!");
-                    handle_client(stream);
-                }
-                Err(e) => {
-                    eprintln!("Error accepting client: {}", e);
-                }
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                println!("New client connected!");
+
+                let users_clone = Arc::clone(&users);
+
+                thread::spawn(move || {
+                    handle_client(stream, users_clone);
+                });
             }
-        }
-        Ok(())
-    }
-
-
-    fn broadcast_message(&self, room_name: &str, message: &str) {
-        if let Some(room) = self.rooms.get(room_name) {
-            for user in room.get_users() {
-                // send message
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+            Err(e) => {
+                eprintln!("Error accepting client: {}", e);
             }
         }
     }
+    Ok(())
 }
 
-fn handle_client(mut stream: TcpStream) {
-    let mut buffer = [0; 512];
+
+fn handle_client(mut stream: TcpStream, users: Arc<Mutex<Vec<User>>>) {
+    let mut buffer = [0; MSG_SIZE];
+    let (tx, rx) = mpsc::channel::<String>();
 
     match stream.read(&mut buffer) {
-        Ok(_) => {
-            // idk
+        Ok(size) => {
+            if size > 0 {
+                let user_str = String::from_utf8_lossy(&buffer[..size]);
+                let user: User = serde_json::from_str(&user_str).unwrap_or_default();
+                
+                {
+                    let mut users_lock = users.lock().unwrap();
+                    users_lock.push(user.clone());
+                }
+                
+                handle_client_messages(stream, user, users);
+
+            }
         }
         Err(e) => {
             eprintln!("Error reading from stream {}", e);
         }
+    }
+}
+
+fn handle_client_messages(mut stream: TcpStream, user: User, users: Arc<Mutex<Vec<User>>>) {
+    let mut buffer = [0; MSG_SIZE];
+    
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                println!("Client disconnected: {}", user.user_name);
+                break;
+            }
+            Ok(size) => {
+                let msg = String::from_utf8_lossy(&buffer[..size]);
+                println!("{}", msg);
+                
+                // process & broadcast msg to other clients
+            }
+            Err(e) => {
+                eprintln!("Error reading from client: {}", e);
+                break;
+            }
+        }
+    }
+
+    let mut users_lock = users.lock().unwrap();
+    if let Some(pos) = users_lock.iter().position(|u| u.user_name == user.user_name) {
+        users_lock.remove(pos);
     }
 }
 

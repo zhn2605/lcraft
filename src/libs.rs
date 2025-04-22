@@ -1,8 +1,10 @@
-#[derive(Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Clone, Deserialize, Serialize)]
 
 pub struct User {
-    user_name: String,
-    curr_room: String,
+    pub user_name: String,
+    // pub curr_room: String,
 }
 
 #[derive(Clone)]

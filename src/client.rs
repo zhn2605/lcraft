@@ -1,13 +1,28 @@
 use std::io::{self, Write};
 use std::net::TcpStream;
+use std::ptr::null;
+use std::thread;
+use std::sync::mpsc;
+
+use crate::libs::User;
 
 pub fn start_client() {
     println!("Client started. Type '/h' to view all commands.");
 
-    handle_input();
+    let user = initialize_user();
+    handle_input(&user);
 }
 
-fn handle_input() {
+fn initialize_user() -> User {
+    // impleemnt userproperly
+    User {
+        user_name: String::from("bob"),
+    }
+}
+
+fn handle_input(user: &User) {
+    let mut stream: Option<TcpStream> = None;
+
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
@@ -39,10 +54,23 @@ fn handle_input() {
                         println!("Specity a port to join.");
                     }
 
-                    join_room(&server_ip, port, &name, &pswd);
+                    stream = join_room(&server_ip, port, &name, &pswd);
+                    if let Some(ref mut s) = stream {
+                        send_user_info(s, user);
+                    } else {
+                        println!("u should never be here. if ur here ur fricked.");
+                    }
                 },
                 "/host" => host_room(),
-                _ => { println!("{}", input); }
+                _ => {
+                    if let Some(ref mut s) = stream {
+                        send_msg(s, input);
+                        println!("{}", input);
+                    } else {
+                        println!("Not connected to any server. Use /join first.");
+                    }
+
+                }
             }
         }
     }
@@ -56,16 +84,28 @@ fn show_help() {
     println!("* /host\n  todo\n");
 }
 
-fn join_room(server_ip: &str, port: u16, name: &str, password: &str) {
+fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<TcpStream> {
     let addr = format!("{}:{}", server_ip, port);
     match TcpStream::connect(&addr) {
-        Ok(mut stream) => {
+        Ok(stream) => {
             println!("Successfully connected to server at {}", addr);
+            Some(stream)
         },
         Err(e) => {
             eprintln!("Failed to connect: {}", e);
+            None
         }
     }
+}
+
+fn send_user_info(stream: &mut TcpStream, user: &User) {
+    let serialized = serde_json::to_string(user).expect("Failed to serialize user info");
+
+    stream.write_all(serialized.as_bytes()).expect("Failed to send user info");
+}
+
+fn send_msg(stream: &mut TcpStream, msg: &str) {
+    stream.write_all(msg.as_bytes()).expect("Failed to send message");
 }
 
 fn host_room() {

@@ -1,8 +1,6 @@
 use std::env;
 use std::process;
 
-use server::Server;
-
 mod client;
 mod server;
 mod libs;
@@ -16,7 +14,7 @@ fn main() {
     }
 
     match args[1].as_str() {
-        "server" => Server::start_server().unwrap(),
+        "server" => server::start_server().unwrap(),
         "client" => client::start_client(),
         _ => {
             eprintln!("Invalid argument. Use 'server' or 'client'.");
