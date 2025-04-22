@@ -1,11 +1,14 @@
 use std::io::{self, Read, Write};
-use std::net::TcpStream;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::thread;
+use std::time::Duration;
 
 use crate::libs::User;
 
 const MSG_SIZE: usize = 512;
+const ATTEMPT_CONNECT_TIME: Duration = Duration::from_secs(5);
 
+// Client entry point
 pub fn start_client() {
     println!("Client started.");
 
@@ -16,6 +19,7 @@ pub fn start_client() {
 }
 
 fn initialize_user() -> User {
+    // Initialize user fields
     print!("Enter user name:\n> ");
     io::stdout().flush().unwrap();
 
@@ -40,11 +44,13 @@ fn handle_input(user: &User) {
         let input = input.trim();
 
         if !input.is_empty() {
+            // parse commands
             let parts: Vec<&str> = input.split_whitespace().collect();
             match parts[0] {
                 "/h" | "/help" => show_help(),
                 "/list" => {println!("Implementing");},
                 "/join" => {
+                    // Fill join room parameters based on inputed fields
                     let mut server_ip = String::new();
                     let mut pswd = String::new();
                     let mut name = String::new();
@@ -63,6 +69,7 @@ fn handle_input(user: &User) {
                         println!("Specity a port to join.");
                     }
 
+                    // join room and send necessary information
                     stream = join_room(&server_ip, port, &name, &pswd);
                     if let Some(ref mut s) = stream {
                         send_user_info(s, user);
@@ -83,6 +90,7 @@ fn handle_input(user: &User) {
                     stream = None;
                 }
                 _ => {
+                    // send msg if in a room
                     if let Some(ref mut s) = stream {
                         send_msg(s, input);
                     } else {
@@ -105,12 +113,20 @@ fn show_help() {
 }
 
 fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<TcpStream> {
-    let addr = format!("{}:{}", server_ip, port);
-    match TcpStream::connect(&addr) {
+    println!("Connecting...");
+
+    // attempt connection with connect_timeout
+    let ip: Ipv4Addr = server_ip.parse().expect("Invalid IP address");
+    let addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(ip, port));
+
+    match TcpStream::connect_timeout(&addr, ATTEMPT_CONNECT_TIME) {
         Ok(stream) => {
             println!("Successfully connected to server at {}", addr);
 
+            // Create clone for message receiving
             let stream_clone = stream.try_clone().expect("Failed to clone stream");
+            
+            // New thread for message receive
             thread::spawn(move || {
                 receive_messages(stream_clone);
             });
@@ -146,6 +162,7 @@ fn receive_messages(mut stream: TcpStream) {
 }
 
 fn send_user_info(stream: &mut TcpStream, user: &User) {
+    // serialize information with serde json and send as stirng
     let serialized = serde_json::to_string(user).expect("Failed to serialize user info");
 
     stream.write_all(serialized.as_bytes()).expect("Failed to send user info");
