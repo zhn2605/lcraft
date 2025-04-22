@@ -4,6 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use crate::libs::User;
+use crate::room;
+use crate::server::GLOBAL_ROOMS;
 
 const MSG_SIZE: usize = 512;
 const ATTEMPT_CONNECT_TIME: Duration = Duration::from_millis(5000);
@@ -62,36 +64,49 @@ fn handle_input(user: &User) {
             let parts: Vec<&str> = input.split_whitespace().collect();
             match parts[0] {
                 "/h" | "/help" => show_help(),
-                "/list" => {println!("Implementing");},
+                "/list" => list_rooms(),
                 "/join" => {
                     // Fill join room parameters based on inputed fields
-                    let mut server_ip = String::new();
                     let mut pswd = String::new();
                     let mut name = String::new();
                     let mut port: u16 = 8080;
 
-                    if parts.len() > 4 {
-                        pswd = parts[4].to_string();
-                    }
                     if parts.len() > 3 {
-                        name = parts[3].to_string();
+                        pswd = parts[3].to_string();
                     }
                     if parts.len() > 2 {
-                        port = parts[2].parse().unwrap();
-                        server_ip = parts[1].to_string();
+                        name = parts[2].to_string();
+                    }
+                    if parts.len() > 1 {
+                        port = parts[1].parse().unwrap();
                     } else {
                         println!("Specity a port to join.");
                     }
 
                     // join room and send necessary information
-                    stream = join_room(&server_ip, port, &name, &pswd);
-                    if let Some(ref mut s) = stream {
-                        send_user_info(s, user);
-                    } else {
-                        println!("No stream found.");
-                    }
+                    stream = join_room(port, &name, &pswd, &mut stream);
                 },
-                "/host" => host_room(),
+                "/host" => {
+                    // Fill host room parameters
+                    let mut room_port: u16 = 8080;
+                    let mut room_name = String::new();
+                    let mut room_pswd = String::new();
+
+                    if parts.len() > 3 {
+                        room_pswd = parts[3].to_string();
+                    }
+                    if parts.len() > 2 {
+                        room_name = parts[2].to_string();
+                    }
+                    if parts.len() > 1 {
+                        room_port = parts[1].parse().unwrap();
+                    } else {
+                        println!("Specity a port to join.");
+                    }
+
+                    stream = host_room(port, &name, &password, &mut stream);
+
+                },
                 "/quit" => {
                     match stream {
                         Some(ref mut s) => {
@@ -103,7 +118,7 @@ fn handle_input(user: &User) {
                         }
                     }
                     stream = None;
-                }
+                },
                 _ => {
                     // send msg if in a room
                     if let Some(ref mut s) = stream {
@@ -122,17 +137,24 @@ fn show_help() {
     println!("Help Menu:");
     println!("* /h, /help\n  Show this help menu\n");
     println!("* /list\n  Show available chat rooms\n");
-    println!("* /join <server_ip> <port> [name] [password]\n  Join specified port\n");
-    println!("* /host\n  todo\n");
+    println!("* /join <port> [name] [password]\n  Join specified port\n");
+    println!("* /host <port> \n  todo\n");
     println!("* /quit\n  Quit your current room/application.\n")
 }
 
-fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<TcpStream> {
+fn join_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>) -> Option<TcpStream> {
+    match stream {
+        Some(s) => {
+            s.shutdown(Shutdown::Both);
+            println!("Disconnected from room.");
+        },
+        None => {}
+    }
+
     println!("Connecting...");
 
     // attempt connection with connect_timeout
-    let ip: Ipv4Addr = server_ip.parse().expect("Invalid IP address");
-    let addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(ip, port));
+    let addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port));
 
     match TcpStream::connect_timeout(&addr, ATTEMPT_CONNECT_TIME) {
         Ok(stream) => {
@@ -145,6 +167,7 @@ fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<T
             thread::spawn(move || {
                 receive_messages(stream_clone);
             });
+            send_user_info(s, user);
 
             Some(stream)
         },
@@ -153,6 +176,10 @@ fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<T
             None
         }
     }
+}
+
+fn host_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>) -> Option<TcpStream> {
+    let room = Room::new(u16)
 }
 
 fn receive_messages(mut stream: TcpStream) {
@@ -190,6 +217,15 @@ fn send_msg(stream: &mut TcpStream, msg: &str) {
     stream.write_all(msg.as_bytes()).expect("Failed to send message");
 }
 
-fn host_room() {
-    println!("Implementing");
+fn list_rooms() {
+    let rooms_guard = GLOBAL_ROOMS.lock().unwrap();
+    
+    if rooms_guard.is_empty() {
+        println!("No rooms are open yet. Create one with /host\n")
+    }
+
+    for room in &*rooms_guard {
+        let formatted_room = format!("-------------------------------\n{}", room.display());
+        println!("{}", formatted_room);
+    }
 }

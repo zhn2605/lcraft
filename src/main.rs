@@ -15,7 +15,7 @@ fn main() {
     }
 
     match args[1].as_str() {
-        "server" => room::start_server().unwrap(),
+        "server" => server::start_server().unwrap(),
         "client" => client::start_client(),
         _ => {
             eprintln!("Invalid argument. Use 'server' or 'client'.");

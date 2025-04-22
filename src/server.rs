@@ -18,6 +18,8 @@ pub fn start_server() -> Result<()> {
     for stream in default_listener.incoming() {
         match stream {
             Ok(stream) => {
+                println!("Client connected");
+
                 let rooms = Arc::clone(&GLOBAL_ROOMS);
                 thread::spawn(move || {
                     handle_client(stream, rooms);
@@ -38,14 +40,42 @@ fn handle_client(mut stream: TcpStream, rooms: Arc<Mutex<Vec<Room>>>) {
         match stream.read(&mut buffer) {
             Ok(0) => {
                 // disconnected
+                println!("Disconnected");
+                break;
             },
             Ok(size) => {
-                let msg = String::from_utf8_lossy(&buffer[..size]);
+                let msg = String::from_utf8_lossy(&buffer[..size]).to_string();
+
+                match msg.as_str() {
+                    "/list" => list_rooms(&stream, &rooms),
+                    "/host" => 
+                    _ => {
+                        stream.write_all("You can join a dedicated room with /join".as_bytes()).expect("Could not print msg");
+                    }
+                }
     
             },
             Err(e) => {
                 eprintln!("Error reading request: {}", e);
             }
         }
+    }
+}
+
+fn list_rooms(mut stream: &TcpStream, rooms: &Arc<Mutex<Vec<Room>>>) {
+    let rooms_guard = rooms.lock().unwrap();
+    
+    if rooms_guard.is_empty() {
+        stream
+            .write_all(b"No rooms are open yet. Create one with /host\n")
+            .expect("Failed to write buffer listing rooms");
+        return;
+    }
+
+    for room in &*rooms_guard {
+        let formatted_room = format!("-------------------------------\n{}", room.display());
+        stream
+            .write_all(formatted_room.as_bytes())
+            .expect("Failed to list rooms");
     }
 }
