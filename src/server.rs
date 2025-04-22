@@ -3,7 +3,7 @@ use std::net::{SocketAddr, TcpStream, TcpListener};
 use std::thread;
 use std::sync::{Arc, Mutex, mpsc};
 
-use crate::libs::{User, Room};
+use crate::libs::{User, Client};
 
 const MSG_SIZE: usize = 512;
 
@@ -11,17 +11,17 @@ pub fn start_server() -> io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8080")?;
     listener.set_nonblocking(true)?;
 
-    let users = Arc::new(Mutex::new(Vec::<User>::new()));
+    let clients = Arc::new(Mutex::new(Vec::<Client>::new()));
     
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 println!("New client connected!");
 
-                let users_clone = Arc::clone(&users);
+                let clients_clone = Arc::clone(&clients);
 
                 thread::spawn(move || {
-                    handle_client(stream, users_clone);
+                    handle_client(stream, clients_clone);
                 });
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
@@ -37,9 +37,8 @@ pub fn start_server() -> io::Result<()> {
 }
 
 
-fn handle_client(mut stream: TcpStream, users: Arc<Mutex<Vec<User>>>) {
+fn handle_client(mut stream: TcpStream, clients: Arc<Mutex<Vec<Client>>>) {
     let mut buffer = [0; MSG_SIZE];
-    let (tx, rx) = mpsc::channel::<String>();
 
     match stream.read(&mut buffer) {
         Ok(size) => {
@@ -48,11 +47,14 @@ fn handle_client(mut stream: TcpStream, users: Arc<Mutex<Vec<User>>>) {
                 let user: User = serde_json::from_str(&user_str).unwrap_or_default();
                 
                 {
-                    let mut users_lock = users.lock().unwrap();
-                    users_lock.push(user.clone());
+                    let mut clients_lock = clients.lock().unwrap();
+                    clients_lock.push(Client {
+                        user: user.clone(),
+                        stream: stream.try_clone().unwrap(),
+                    });
                 }
                 
-                handle_client_messages(stream, user, users);
+                handle_client_messages(stream, &user, clients);
 
             }
         }
@@ -62,7 +64,7 @@ fn handle_client(mut stream: TcpStream, users: Arc<Mutex<Vec<User>>>) {
     }
 }
 
-fn handle_client_messages(mut stream: TcpStream, user: User, users: Arc<Mutex<Vec<User>>>) {
+fn handle_client_messages(mut stream: TcpStream, user: &User, clients: Arc<Mutex<Vec<Client>>>) {
     let mut buffer = [0; MSG_SIZE];
     
     loop {
@@ -73,9 +75,10 @@ fn handle_client_messages(mut stream: TcpStream, user: User, users: Arc<Mutex<Ve
             }
             Ok(size) => {
                 let msg = String::from_utf8_lossy(&buffer[..size]);
-                println!("{}", msg);
+                println!("{}: {}", user.user_name, msg);
                 
                 // process & broadcast msg to other clients
+                broadcast_message(&msg, user, &clients);
             }
             Err(e) => {
                 eprintln!("Error reading from client: {}", e);
@@ -84,9 +87,26 @@ fn handle_client_messages(mut stream: TcpStream, user: User, users: Arc<Mutex<Ve
         }
     }
 
-    let mut users_lock = users.lock().unwrap();
-    if let Some(pos) = users_lock.iter().position(|u| u.user_name == user.user_name) {
-        users_lock.remove(pos);
+    let mut clients_lock = clients.lock().unwrap();
+    if let Some(pos) = clients_lock.iter().position(|c| c.user.user_name == user.user_name) {
+        clients_lock.remove(pos);
+    }
+}
+
+fn broadcast_message(msg: &str, user: &User, clients: &Arc<Mutex<Vec<Client>>>) {
+    let clients_guard = clients.lock().unwrap();
+
+    for client in clients_guard.iter() {
+        if client.user == *user {
+            continue;
+        }
+
+        if let Ok(mut stream_clone) = client.stream.try_clone() {
+            let formatted_msg = format!("{}: {}", user.user_name, msg);
+            stream_clone
+                .write_all(formatted_msg.as_bytes())
+                .expect(format!("Failed to send message to {}", client.user.user_name).as_str());
+        }   
     }
 }
 

@@ -1,22 +1,30 @@
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::ptr::null;
 use std::thread;
-use std::sync::mpsc;
 
 use crate::libs::User;
 
+const MSG_SIZE: usize = 512;
+
 pub fn start_client() {
-    println!("Client started. Type '/h' to view all commands.");
+    println!("Client started.");
 
     let user = initialize_user();
+    println!("Welcome {}. Type '/h' to view all commands.", user.user_name);
     handle_input(&user);
+    println!("Goodbye!");
 }
 
 fn initialize_user() -> User {
-    // impleemnt userproperly
+    print!("Enter user name:\n> ");
+    io::stdout().flush().unwrap();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    let input = input.trim();
+
     User {
-        user_name: String::from("bob"),
+        user_name: String::from(input),
     }
 }
 
@@ -35,6 +43,7 @@ fn handle_input(user: &User) {
             let parts: Vec<&str> = input.split_whitespace().collect();
             match parts[0] {
                 "/h" | "/help" => show_help(),
+                "/list" => {println!("Implementing");},
                 "/join" => {
                     let mut server_ip = String::new();
                     let mut pswd = String::new();
@@ -58,14 +67,24 @@ fn handle_input(user: &User) {
                     if let Some(ref mut s) = stream {
                         send_user_info(s, user);
                     } else {
-                        println!("u should never be here. if ur here ur fricked.");
+                        println!("No stream found.");
                     }
                 },
                 "/host" => host_room(),
+                "/quit" => {
+                    match stream {
+                        Some(_) => {
+                            println!("Leaving the room...");
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                    stream = None;
+                }
                 _ => {
                     if let Some(ref mut s) = stream {
                         send_msg(s, input);
-                        println!("{}", input);
                     } else {
                         println!("Not connected to any server. Use /join first.");
                     }
@@ -82,6 +101,7 @@ fn show_help() {
     println!("* /list\n  Show available chat rooms\n");
     println!("* /join <server_ip> <port> [name] [password]\n  Join specified port\n");
     println!("* /host\n  todo\n");
+    println!("* /quit\n  Quit your current room/application.\n")
 }
 
 fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<TcpStream> {
@@ -89,11 +109,38 @@ fn join_room(server_ip: &str, port: u16, name: &str, password: &str) -> Option<T
     match TcpStream::connect(&addr) {
         Ok(stream) => {
             println!("Successfully connected to server at {}", addr);
+
+            let stream_clone = stream.try_clone().expect("Failed to clone stream");
+            thread::spawn(move || {
+                receive_messages(stream_clone);
+            });
+
             Some(stream)
         },
         Err(e) => {
             eprintln!("Failed to connect: {}", e);
             None
+        }
+    }
+}
+
+fn receive_messages(mut stream: TcpStream) {
+    let mut buffer = [0; MSG_SIZE];
+
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                println!("! Disconnected from the server");
+                break;
+            }
+            Ok(size) => {
+                let msg = String::from_utf8_lossy(&buffer[..size]);
+                println!("{}", msg);
+            }
+            Err(e) => {
+                eprintln!("Error reading from server {}: ", e);
+                break;
+            }
         }
     }
 }

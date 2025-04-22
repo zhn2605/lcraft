@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
+use std::net::TcpStream;
 
-#[derive(Default, Clone, Deserialize, Serialize)]
+#[derive(Default, Clone, Deserialize, Serialize, PartialEq)]
 
 pub struct User {
     pub user_name: String,
     // pub curr_room: String,
+}
+
+pub struct Client {
+    pub user: User,
+    pub stream: TcpStream,
 }
 
 #[derive(Clone)]
