@@ -1,12 +1,12 @@
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream, Shutdown};
 use std::thread;
 use std::time::Duration;
 
 use crate::libs::User;
 
 const MSG_SIZE: usize = 512;
-const ATTEMPT_CONNECT_TIME: Duration = Duration::from_secs(5);
+const ATTEMPT_CONNECT_TIME: Duration = Duration::from_millis(5000);
 
 // Client entry point
 pub fn start_client() {
@@ -20,12 +20,26 @@ pub fn start_client() {
 
 fn initialize_user() -> User {
     // Initialize user fields
-    print!("Enter user name:\n> ");
-    io::stdout().flush().unwrap();
 
+    print!("Enter user name:\n> ");
+        io::stdout().flush().unwrap();
+    
+    // User name
     let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let input = input.trim();
+    
+    // Username
+    loop {
+        io::stdin().read_line(&mut input).unwrap();
+        let input = input.trim();
+
+        if !input.is_empty() && input.chars().all(|c| c.is_alphanumeric()) {
+            break;
+        } else {
+            println!("Must be alpha numeric.\n Enter user name:\n> ");
+        }
+    }
+
+    // other fields
 
     User {
         user_name: String::from(input),
@@ -80,8 +94,9 @@ fn handle_input(user: &User) {
                 "/host" => host_room(),
                 "/quit" => {
                     match stream {
-                        Some(_) => {
+                        Some(ref mut s) => {
                             println!("Leaving the room...");
+                            let _ = s.shutdown(Shutdown::Both);
                         }
                         None => {
                             break;
@@ -146,7 +161,7 @@ fn receive_messages(mut stream: TcpStream) {
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => {
-                println!("! Disconnected from the server");
+                println!("\n! Disconnected from the server");
                 break;
             }
             Ok(size) => {
@@ -159,6 +174,9 @@ fn receive_messages(mut stream: TcpStream) {
             }
         }
     }
+
+    print!("> ");
+    io::stdout().flush().unwrap();
 }
 
 fn send_user_info(stream: &mut TcpStream, user: &User) {
