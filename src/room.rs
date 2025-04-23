@@ -111,15 +111,3 @@ fn broadcast_message(msg: &str, user: &User, clients: &Arc<Mutex<Vec<Client>>>) 
 }
 
 
-fn try_connect() {
-    for n in 8000..9000 {
-        let curr_socket_addr = SocketAddr::from(([127, 0, 0, 1], n));
-
-        if let Ok(stream) = TcpStream::connect(curr_socket_addr) {
-            println!("Connected to the server! {}", curr_socket_addr);
-            break;
-        } else {
-            println!("Couldn't connect to server... {}", curr_socket_addr);
-        }
-    }
-}

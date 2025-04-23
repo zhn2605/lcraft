@@ -1,10 +1,9 @@
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream, Shutdown};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
-use crate::libs::User;
-use crate::room;
+use crate::libs::{User, Room};
 use crate::server::GLOBAL_ROOMS;
 
 const MSG_SIZE: usize = 512;
@@ -21,30 +20,24 @@ pub fn start_client() {
 }
 
 fn initialize_user() -> User {
-    // Initialize user fields
-
     print!("Enter user name:\n> ");
-        io::stdout().flush().unwrap();
-    
-    // User name
-    let mut input = String::new();
-    
-    // Username
-    loop {
+    io::stdout().flush().unwrap();
+
+    let user_name = loop {
+        let mut input = String::new(); 
         io::stdin().read_line(&mut input).unwrap();
         let input = input.trim();
 
         if !input.is_empty() && input.chars().all(|c| c.is_alphanumeric()) {
-            break;
+            break input.to_string();
         } else {
-            println!("Must be alpha numeric.\n Enter user name:\n> ");
+            println!("Must be alphanumeric.\nEnter user name:\n> ");
+            io::stdout().flush().unwrap();
         }
-    }
-
-    // other fields
+    };
 
     User {
-        user_name: String::from(input),
+        user_name: user_name,
     }
 }
 
@@ -57,14 +50,33 @@ fn handle_input(user: &User) {
 
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
-        let input = input.trim();
+        let input = input.trim().to_string();
 
         if !input.is_empty() {
             // parse commands
             let parts: Vec<&str> = input.split_whitespace().collect();
             match parts[0] {
                 "/h" | "/help" => show_help(),
-                "/list" => list_rooms(),
+                "/list" => {
+                    let mut start_port: u16 = 8000;
+                    let mut end_port: u16 = 9000;
+
+                    if parts.len() > 3 {
+                        end_port = parts[3].parse().unwrap();
+                    }
+                    if parts.len() > 2 {
+                        start_port = parts[2].parse().unwrap()
+                    }
+                    if parts.len() > 1 {
+                        if parts[1].to_lowercase() == "rooms" {
+                            list_rooms();
+                        } else if parts[1].to_lowercase() == "connections" {
+                            list_connections(start_port, end_port);
+                        }
+                    } else {
+                        println!("! Usage: /list <rooms|connections [start_port] [end_port]>")
+                    }
+                }
                 "/join" => {
                     // Fill join room parameters based on inputed fields
                     let mut pswd = String::new();
@@ -84,11 +96,10 @@ fn handle_input(user: &User) {
                     }
 
                     // join room and send necessary information
-                    stream = join_room(port, &name, &pswd, &mut stream);
-                },
+                    stream = join_room(port, &name, &pswd, &mut stream, user);
+                }
                 "/host" => {
                     // Fill host room parameters
-                    let mut room_port: u16 = 8080;
                     let mut room_name = String::new();
                     let mut room_pswd = String::new();
 
@@ -99,14 +110,13 @@ fn handle_input(user: &User) {
                         room_name = parts[2].to_string();
                     }
                     if parts.len() > 1 {
-                        room_port = parts[1].parse().unwrap();
+                        let room_port = parts[1].parse::<u16>().unwrap();
+                        stream = host_room(room_port, &room_name, &room_pswd, &mut stream, user);
                     } else {
                         println!("Specity a port to join.");
                     }
 
-                    stream = host_room(port, &name, &password, &mut stream);
-
-                },
+                }
                 "/quit" => {
                     match stream {
                         Some(ref mut s) => {
@@ -118,11 +128,11 @@ fn handle_input(user: &User) {
                         }
                     }
                     stream = None;
-                },
+                }
                 _ => {
                     // send msg if in a room
                     if let Some(ref mut s) = stream {
-                        send_msg(s, input);
+                        send_msg(s, input.as_str());
                     } else {
                         println!("Not connected to any server. Use /join first.");
                     }
@@ -142,10 +152,10 @@ fn show_help() {
     println!("* /quit\n  Quit your current room/application.\n")
 }
 
-fn join_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>) -> Option<TcpStream> {
+fn join_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>, user: &User) -> Option<TcpStream> {
     match stream {
         Some(s) => {
-            s.shutdown(Shutdown::Both);
+            s.shutdown(Shutdown::Both).unwrap();
             println!("Disconnected from room.");
         },
         None => {}
@@ -157,19 +167,19 @@ fn join_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>) 
     let addr: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port));
 
     match TcpStream::connect_timeout(&addr, ATTEMPT_CONNECT_TIME) {
-        Ok(stream) => {
+        Ok(mut s) => {
             println!("Successfully connected to server at {}", addr);
 
             // Create clone for message receiving
-            let stream_clone = stream.try_clone().expect("Failed to clone stream");
+            let stream_clone = s.try_clone().expect("Failed to clone stream");
             
             // New thread for message receive
             thread::spawn(move || {
                 receive_messages(stream_clone);
             });
-            send_user_info(s, user);
+            send_user_info(&mut s, user);
 
-            Some(stream)
+            Some(s)
         },
         Err(e) => {
             eprintln!("Failed to connect: {}", e);
@@ -178,8 +188,19 @@ fn join_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>) 
     }
 }
 
-fn host_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>) -> Option<TcpStream> {
-    let room = Room::new(u16)
+fn host_room(port: u16, name: &str, pswd: &str, stream: &mut Option<TcpStream>, user: &User) -> Option<TcpStream> {
+    let mut rooms_guard = GLOBAL_ROOMS.lock().unwrap();
+    
+    let room = Room::new(port, name.to_string(), pswd.to_string(), 4);
+    let mut room_clone = room.clone();
+
+    thread::spawn(move || {
+        room_clone.start_server(port).unwrap();
+    });
+
+    rooms_guard.push(room);
+    join_room(port, name, pswd, stream, user)
+
 }
 
 fn receive_messages(mut stream: TcpStream) {
@@ -227,5 +248,15 @@ fn list_rooms() {
     for room in &*rooms_guard {
         let formatted_room = format!("-------------------------------\n{}", room.display());
         println!("{}", formatted_room);
+    }
+}
+
+fn list_connections(start: u16, end: u16) {
+    for n in start..end {
+        let curr_socket_addr = SocketAddr::from(([0, 0, 0, 0], n));
+
+        if let Ok(_) = TcpListener::bind(curr_socket_addr) {
+            println!("Available: {}", curr_socket_addr);
+        }
     }
 }
